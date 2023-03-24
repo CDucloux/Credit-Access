@@ -2,6 +2,8 @@
 
 Réalisé par *Aybuké BICAT* & *Corentin DUCLOUX*
 
+Le fichier `.pdf` contient l'ensemble de l'analyse $-$ Bonne lecture !
+
 ## Présentation
 
 *Données issues de la base [Global Findex 2017](https://www.worldbank.org/en/publication/globalfindex)*
