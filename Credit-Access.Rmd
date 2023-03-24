@@ -1,0 +1,694 @@
+---
+title: \textcolor{blackUniv}{\Huge \textbf{Access to credit}}
+author: "Aybuké BICAT & Corentin DUCLOUX"
+date: \includegraphics[width=8cm]{picsou.jpg}
+header-includes:
+   - \usepackage{xcolor}
+   - \usepackage{color}
+   - \usepackage{soul}
+   - \usepackage{bbm}
+   - \usepackage{fancyhdr}
+   - \usepackage{graphicx}
+   - \usepackage{titling}
+   - \usepackage{tikz}
+   - \usepackage[most]{tcolorbox}
+   - \tcbuselibrary{skins,breakable}
+   - \definecolor{surligneur}{HTML}{cccbca}
+   - \definecolor{blackUniv}{RGB}{47,62,71}
+   - \definecolor{greenUniv}{RGB}{15,174,159}
+   - \definecolor{darkblue}{RGB}{14,131,136}
+   - \definecolor{lightblue}{RGB}{203,228,222}
+   - \pretitle{\begin{center}\LARGE\includegraphics[width=12cm]{ut.png}\\\noindent\rule{16cm}{0.4pt}\\\vspace{5mm}}
+   - \posttitle{\end{center}}
+output: 
+  pdf_document:
+    df_print: kable
+    highlight: tango
+    toc: true
+    toc_depth: 3
+toc-title: \hypertarget{contents}{}\textcolor{blackUniv}{Table des matières :}
+colorlinks: true
+geometry: margin=2cm
+fontsize: 12pt
+line-height: 1.5
+documentclass: report
+---
+
+\pagestyle{fancy}
+\fancyhead[CE,CE]{Your Document Header}
+\fancyhead[LE,RO]{
+  \begin{tikzpicture}
+    \fill[color=gray!60] (-1.75,0) -- (0,0) -- (0.25,0.5) -- (-1.5,0.5)  -- cycle;
+    \fill[color=gray!20] (-3.75,0) -- (-2,0) -- (-1.75,0.5) -- (-3.5,0.5)  -- cycle;
+    \fill[color=gray!60] (-5.75,0) -- (-4,0) -- (-3.75,0.5) -- (-5.5,0.5)  -- cycle;
+  \end{tikzpicture}}
+\fancyfoot[LE,RO]{\includegraphics[width=2cm]{mecen_transparent.png}}
+\fancyfoot[LO,CE]{\hyperlink{contents}{\includegraphics[width=0.75cm]{fleche_retour.png}}}
+
+<!-- TeX for Setting up Boxes -->
+
+\tcbset {
+  base/.style={
+    arc=0mm, 
+    bottomtitle=0.5mm,
+    boxrule=0mm,
+    colbacktitle=black!20!white, 
+    coltitle=black,
+    colback=white,
+    fonttitle=\bfseries, 
+    left=2.5mm,
+    leftrule=1mm,
+    right=3.5mm,
+    title={#1},
+    toptitle=0.75mm, 
+  }
+}
+
+
+```{=tex}
+\newtcolorbox{mainbox}[1]{colframe = blackUniv, base={#1}}
+```
+
+\newpage
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warnings = FALSE, out.width = "75%",
+                      fig.align = "center")
+```
+
+```{r import_lib, warning=FALSE}
+library(FactoMineR)
+library(corrplot)
+library(factoextra)
+library(kableExtra)
+library(tidyverse)
+library(ggpubr)
+library(patchwork)
+library(haven)
+library(DataExplorer)
+library(forcats)
+library(stargazer)
+library(sandwich)
+library(lmtest)
+library(glmnet)
+library(tidymodels)
+library(ROCR)
+library(pROC)
+library(glmtoolbox)
+library(Hmisc)
+```
+
+```{r colors}
+lightblue <- "#CBE4DE"
+darkblue <- "#0E8388"
+```
+
+
+## Sujet
+
+Les données proviennent de la base **Global Findex 2017** de la *Banque Mondiale*. Elles sont collectées dans 148 pays. Dans chaque pays, 1000 individus ont été interrogés. 
+
+L'objectif est de repérer les déterminants de l'accès au crédit ~ variable à expliquer `fin19`.
+
+***
+
+Commençons par importer les données :
+
+```{r import_data, echo = TRUE}
+df_credit <- read_dta("~/R data/findex_Germany.dta")
+```
+
+Une analyse de la première variable `economy` permet de remarquer que le seul pays observé pour tous les individus est l'Allemagne.
+
+```{r recodage_na}
+sub_credit <- select(df_credit, -c(educ,inc_q)) |> 
+  mutate_all(~na_if(., 3)) |> 
+  mutate_all(~na_if(., 4)) |> 
+  mutate_all(~na_if(., 5)) 
+
+sub_educ <- select(df_credit, educ) |> 
+  mutate_all(~na_if(.,4)) |> 
+  mutate_all(~na_if(., 5))
+
+inc_q <- select(df_credit, inc_q)
+
+df_credit <- cbind(sub_credit,sub_educ,inc_q) |>
+  relocate(educ, .after = age) |>
+  relocate(inc_q, .after = educ)
+```
+
+## Analyse statistique 
+
+On commence par observer les effectifs par modalité de la **variable à expliquer** :
+
+```{r tableau_1}
+tab_1 <- table(df_credit$fin19)
+
+tab_1 |> 
+  kable(booktabs = T, escape = F, col.names = c("Variable fin19","$n$")) |> 
+  add_header_above(header = c("Effectif des individus ayant un crédit:" = 2),
+                   color = "blackUniv", align = "c", italic = T, bold = T) |> 
+    kable_styling(full_width = F, position = "center",
+                  latex_options = c("striped", "hold_position"))
+
+prop_yes <- unname(round(tab_1[1]/sum(tab_1),3))*100
+prop_no <- unname(round(tab_1[2]/sum(tab_1),3))*100
+```
+
+- On remarque que seulement `r prop_yes`% des individus de l'échantillon ont un *crédit immobilier*.
+- Les proportions des modalités de `fin19` sont déséquilibrées $\Rightarrow$ **Cela va avoir une incidence lorsque l'on va vouloir estimer la variable avec un modèle.**
+
+### Lien entre crédit et niveau de revenu
+
+La variable `inc_q` est découpée en 5 classes proportionnelles (quintiles) déterminant le niveau de revenu des individus $\Rightarrow 1$ correspondant aux 20% les plus pauvres et $5$ correspondant aux 20% les plus riches.
+
+\begin{mainbox}
+
+On peut se demander si faire partie des individus les plus riches influe dans la contraction d'un crédit :
+
+\end{mainbox}
+
+```{r tableau_2}
+tab_2 <- cbind(1:5,unname(table(df_credit$inc_q, df_credit$fin19)))
+
+tab_2 |> 
+  kable(booktabs = T,escape = F,
+        col.names = c("Revenu","Crédit","Pas de crédit")) |> 
+  add_header_above(header = c("Crédit en fonction du niveau de revenu" = 3),
+                   color = "blackUniv", align = "c", italic = T, bold = T) |> 
+    kable_styling(full_width = F, position = "center",
+                  latex_options = c("striped", "hold_position"))
+
+prop_2 <- round((prop.table(tab_2[,2:3], margin = 1)*100),1)
+```
+
+- On remarque que les individus situés dans le quintile $1$ des revenus (20% les plus pauvres) ne possèdent pas de crédit dans `r prop_2[1,2]`% des cas.
+- La plus haute proportion des individus possédant un crédit est située dans le quintile $5$ (20% les plus riches) avec `r prop_2[5,1]`%.
+
+### Lien entre crédit et genre
+
+```{r tableau_3}
+tab_3 <- cbind(c(1,2),unname(table(df_credit$female, df_credit$fin19)))
+
+tab_3 |> 
+  kable(booktabs = T,escape = F,
+        col.names = c("Sexe","Crédit","Pas de crédit")) |> 
+  add_header_above(header = c("Crédit en fonction du sexe" = 3),
+                   color = "blackUniv", align = "c", italic = T, bold = T) |> 
+    kable_styling(full_width = F, position = "center",
+                  latex_options = c("striped", "hold_position")) |> 
+  footnote(general = "1 si Homme, 2 si Femme", footnote_as_chunk = T)
+
+prop_3 <- round((prop.table(tab_3[,2:3], margin = 1)*100),1)
+```
+
+- On remarque qu'il n'y a pas de différence significative dans les proportions entre les hommes et les femmes concernant la contraction d'un crédit (`r prop_3[1,1]`%) & (`r prop_3[2,1]`%)
+
+### Lien entre crédit et appartenance à la population active
+
+```{r tablau_4}
+tab_4 <- cbind(c(0,1),unname(table(df_credit$emp_in, df_credit$fin19)))
+
+tab_4 |> 
+  kable(booktabs = T,escape = F,
+        col.names = c("Employé","Crédit","Pas de crédit"))|> 
+  add_header_above(header = c("Crédit en fonction de la présence \n sur le marché du travail" = 3),
+                   color = "blackUniv", align = "c", italic = T, bold = T) |> 
+    kable_styling(full_width = F, position = "center",
+                  latex_options = c("striped", "hold_position")) |> 
+    footnote(general = "1 si employé, 0 sinon", footnote_as_chunk = T)
+
+prop_4 <- round((prop.table(tab_4[,2:3], margin = 1)*100),1)
+```
+
+- Les individus qui ne sont pas présents sur le marché du travail (chômeurs, mineurs, ou à la retraite) ont un crédit dans `r prop_4[1,1]`% des cas, soit une proportion de `r prop_4[2,1]-prop_4[1,1]`% inférieure aux actifs.
+
+- Plusieurs effets peuvent ici intervenir : 
+  - Si un individu est âgé, il est probable qu'il ait déjà eu des crédits auparavant et qu'il a    terminé de les rembourser.
+  - Si un individu est mineur, il est logique qu'il ne puisse pas faire de crédit.
+  - Si un individu est au chômage, sa capacité d'emprunt est réduite.
+
+### Lien entre crédit et carte de débit/crédit
+
+\begin{mainbox}
+
+On peut se demander si posséder une \textbf{carte de crédit} ou une \textbf{carte de débit} influe dans le fait d'avoir contracté un crédit :
+
+\end{mainbox}
+
+- La barre \textcolor{darkblue}{$\blacksquare$} distingue la proportion d'individus ayant une carte de crédit/débit
+
+- La barre \textcolor{lightblue}{$\blacksquare$} distingue la proportion d'individus n'ayant pas de carte de crédit/débit
+
+```{r ggplot_credit_debit, warning=FALSE}
+
+color_barplot <- c(darkblue, lightblue, darkblue, lightblue)
+
+filter_data_ggplot <- df_credit[is.na(df_credit$fin19) == FALSE,]
+
+filter_data_ggplot$fin19 <- case_when(
+  filter_data_ggplot$fin19 == 1 ~ "crédit",
+  filter_data_ggplot$fin19 == 2 ~ "pas de crédit",
+)
+
+p1 <- ggplot(filter_data_ggplot, aes(x = fin2)) + 
+  geom_bar(aes(y = after_stat(prop)), alpha = 0.8, 
+           color = "white", fill = color_barplot) + 
+  labs(x = "", y = "Proportion") + facet_wrap(~fin19) + theme_minimal() +
+  scale_x_discrete("") + ggtitle("Crédit &\npossession d'une carte de débit")
+
+p2 <- ggplot(filter_data_ggplot, aes(x = fin7)) + 
+  geom_bar(aes(y = after_stat(prop)), alpha = 0.8, 
+           color = "white", fill = color_barplot) + 
+  labs(x = "", y = "") + facet_wrap(~fin19) + theme_minimal() + 
+  scale_x_discrete() + ggtitle("Crédit &\npossession d'une carte de crédit")
+
+p1 + p2
+```
+
+- La proportion d'individus ne possédant pas de crédit est plus conséquente lorsque ceux-ci ne possèdent pas de carte de crédit, tandis qu'il ne semble pas y avoir un lien significatif entre carte de débit & crédit.
+
+### Lien entre crédit & âge
+
+\begin{mainbox}
+
+Contracter un crédit n'est pas indispensable pour tout le monde ! En effet, lorsqu'un individu est à la retraite, il est très probablement déjà propriétaire, dès lors, il n'a pas besoin de contracter de crédit.
+
+\end{mainbox}
+
+- On découpe la variable `age` en **5** classes égales :
+
+```{r tableau_5}
+
+df_credit$age2 <- cut(df_credit$age, 5, dig.lab = 2)
+
+tab_5 <- table(df_credit$age2, df_credit$fin19)
+classe_age <- sub("\\(", "[", rownames(tab_5))
+tab_5 <- unname(round(prop.table(tab_5, margin = 1)*100,1))
+tab_5 <- cbind(unname(classe_age), tab_5)
+tab_5[,2:3] <- paste0(tab_5[,2:3], "%")
+
+tab_5 |> 
+  kable(booktabs = T,escape = T,
+        col.names = c("Classe d'âge","Crédit","Pas de crédit"))|> 
+  add_header_above(header = c("Crédit en fonction de l'appartenance\nà une classe d'âge" = 3),
+                   color = "blackUniv", align = "c", italic = T, bold = T) |> 
+    kable_styling(full_width = F, position = "center",
+                  latex_options = c("striped", "hold_position"))
+```
+
+- On remarque effectivement que les classes d'âge les plus concernées par le crédit sont **[30,45]** & **[45,60]**. 
+- On observe une baisse significative du taux de crédit passé cet âge.
+
+\newpage
+
+### Analyse des corrélations
+
+```{r corrplot}
+M <- cor(na.omit(df_credit[,c(-1,-10,-11,-14)]))
+
+corrplot(M, order = 'hclust',type = 'upper',
+         diag = FALSE, method = 'square',
+         cl.ratio = 0.15, cl.cex = 0.7,
+         tl.col = 'black', tl.srt = 45,tl.cex = 0.7,
+         col = COL1("Purples", n = 200))
+```
+
+- La variable `fin7` et la variable `borrowed` sont fortement (négativement) corrélées : **`r round(M[7,10],2)`**.
+- **Intuition :** sans carte de crédit, impossible d'emprunter $\Rightarrow$ Les individus concernés n'ont peut-être pas de compte ouvert dans un établissement bancaire.
+
+### Analyse des correspondances multiples
+
+*Remarque* : On retire les variables `fin33` & `fin46` de l'analyse car elles ont une proportion de valeurs non-renseignées égales à respectivement `r sum(is.na(df_credit$fin33))/nrow(df_credit)*100`% & `r sum(is.na(df_credit$fin46))/nrow(df_credit)*100`%
+
+```{r mca}
+df_mca <- na.omit(df_credit[,c(-1,-10,-11,-14)])
+df_mca$age <- as.factor(sub("\\(", "[", cut(df_mca$age, 5, dig.lab = 2)))
+df_mca <- df_mca |> select_all() |> as_factor()
+
+acm <- MCA(df_mca, graph = F)
+```
+
+```{r modalites}
+modalites <- names(acm$call$Xtot)
+
+color_mod <- ifelse(
+  str_detect(modalites, "20%") == TRUE, "orange",
+    ifelse(
+      str_detect(modalites, "Male") == TRUE, "red",
+        ifelse(
+          str_detect(modalites, "Female") == TRUE, "red",
+            ifelse(
+              str_detect(modalites, ",") == TRUE, "lightblue",
+                ifelse(
+                  str_detect(modalites, "completed") == TRUE, "pink",
+                    ifelse(
+                      str_detect(modalites, "secondary") == TRUE, "pink",
+                        ifelse(
+                          str_detect(modalites, "workforce") == TRUE, "yellow",
+                            ifelse(
+                              str_detect(modalites, "fin7") == TRUE, "purple",
+                                ifelse(
+                                  str_detect(modalites, "fin19") == TRUE, "darkgreen",
+                                    ifelse(
+                                      str_detect(modalites, "fin2")== TRUE, "magenta",
+                                        ifelse(
+                                          str_detect(modalites, "saved")== TRUE, "brown",                                                                                ifelse(
+                                              str_detect(modalites, "borrowed") == TRUE, "lightpink","green"))))))))))))
+
+```
+
+```{r regroupements}
+fviz_mca_var(acm, repel = TRUE, col.var = color_mod,
+                  choice = "var.cat", title = "Nuage des modalités",
+                ggtheme = theme_minimal()) +
+  theme(legend.position = "none")
+```
+
+D'après le nuage des modalités, on peut voir que 2 groupes distincts apparaissent :
+
+- Le groupe qui a contracté un crédit, où on retrouve un profil de personnes qui sont des hommes entre 30 et 60 ans et qui ont fait des études supérieures. Ce sont aussi les personnes les plus aisées puisqu'elles sont associées aux modalités de revenu les plus élevées soit de **Middle 20%** à **Richest 20%**. Ils ont également une carte de crédit et de débit, et ont déjà épargné.
+
+- Le deuxième groupe se compose majoritairement de femmes, qui se sont arrêtées à l'enseignement secondaire et qui ont un revenu moyen, voire faible (2e et 3e quantile). Dans ce groupe, les individus n'ont pas contracté de crédit mais possèdent une carte de débit.
+
+```{r contrib}
+fviz_contrib(acm, choice = "var", axes = 1, fill = darkblue , color = darkblue) +
+fviz_contrib(acm, choice = "var", axes = 2, fill = darkblue , color = darkblue)
+```
+
+Pour les contributions des modalités aux axes, on peut voir que: 
+
+- Les variables `borrowed`, `fin7`, `emp_in`, la modalité `completed tertiary or more` (soit avoir complété l'enseignement supérieur), la modalité **Poorest 20%** de la variable `inc_q` et enfin la tranche d'âge la plus jeune `[15,30]` contribuent à la construction de l'axe $F_1$.
+
+- Toutes les modalités de l'âge sauf la tranche `[30,45]` contribuent à la construction de l'axe $F_2$, ainsi que la variable `emp_in` et la modalité **Second 20%** venant de `inc_q`.
+
+## Modèle à probabilité linéaire
+
+\begin{mainbox}{Méthode des moindres carrés ordinaires}
+
+L'objectif est désormais d'estimer la variable \textbf{fin19} (ie l'accès au crédit) par la méthode des MCO. Cependant, la variable n'est pas \textit{quantitative} mais \textit{dichotomique}.
+
+$$\text{fin19} =\begin{cases} 1 \text{ si l'individu a un crédit}\\2 \text{ si l'individu n'a pas de crédit} \end{cases}$$
+Cela va impliquer plusieurs violations d'hypothèses :
+
+\end{mainbox}
+
+- Les MCO conduisent à des estimations distribuées entre $]-\infty \hspace{0.25em};\hspace{0.25em} +\infty[$ $\Rightarrow$ L'estimation par MCO est donc biaisée.
+
+- Non-normalité des résidus : $\epsilon_i \not\sim \mathcal{N}(0,\,\sigma^{2})$.
+
+- Les termes d’erreurs $\epsilon_i$ n'auront pas la même variance pour toutes les valeurs des $X_i$ : on est en présence d'**hétéroscédasticité**.
+
+### Sans correction d'hétéroscédasticité
+
+On a vu précédemment que les variables `fin7` et `borrowed` étaient très corrélées. Nous allons donc retirer la variable `fin7`(risque de multicolinéarité).
+
+**TRANSFORMATIONS :**
+
+- Nous renommons la variable à expliquer `fin19` en `credit` et changeons les modalités $(1,2) \Rightarrow (0,1)$. **Dans ce cas, la modalité 0 correspond à avoir un crédit tandis que la modaité 1 correspond à ne pas avoir de crédit.**
+
+- Nous utiliserons la variable `age` transformée en classes pour capturer les effets spécifiques d'appartenance à une classe d'âge.
+
+- Les variables `female` et `educ` n'ont pas été inclues dans le modèle car leurs coefficients associés ne sont pas significatifs *(ce dont on pouvait se douter grâce à l'analyse descriptive)*.
+
+- Pour rendre la lecture des résultats plus claire, nous transformons toutes les variables dichotomiques et catégorielles en *factor* avant la spécification du modèle.
+
+$$
+\begin{split}
+credit = \beta_0 + \beta_1age_{[30-45]}+\beta_2age_{[45-60]}+\beta_3age_{[60-75]}+\beta_4age_{[75-90]}+\\\beta_5inc\_q_2+\beta_6inc\_q_3+\beta_7inc\_q_4+\beta_8inc\_q_5+\\\beta_9employed_1+\beta_{10}saved_1+\beta_{11}borrowed_1 + \epsilon
+\end{split}
+$$
+
+
+```{r df_engineering}
+df_estimate <- na.omit(df_credit[,c(-1,-10,-11,-14)])
+
+df_estimate$age <- as.factor(sub("\\(", "[", cut(df_estimate$age, 5, dig.lab = 2)))
+df_estimate$income_quintile <- as.factor(df_estimate$inc_q)
+df_estimate$employed <- as.factor(df_estimate$emp_in)
+df_estimate$saved <- as.factor(df_estimate$saved)
+df_estimate$borrowed <- as.factor(df_estimate$borrowed)
+df_estimate$debit_card <- as.factor(df_estimate$fin2)
+
+df_estimate$credit <- case_when(
+  df_estimate$fin19 == 1 ~ 0,
+  df_estimate$fin19 == 2 ~ 1,
+)
+```
+
+```{r mco, results='asis'}
+MCO = lm(credit ~ age + income_quintile + employed + saved + borrowed,
+         data = df_estimate)
+
+stargazer(MCO, type = "latex", header = F, font.size = "small", single.row = TRUE, selection.equation = T, title = "Modèle à probabilité linéaire")
+```
+
+- Les coefficients associés à `saved` et `borrowed` sont significatifs au seuil de 1%, les coefficients associés à `income_quantile5` et à `age[30,45]` sont significatifs au seuil de 5%. Le signe de toutes ces variables est **négatif** : la probabilité de ne pas avoir de crédit diminue lorsque l'individu a emprunté l'année précédente, fait des économies, est situé dans la classe d'âge de 30 à 45 ans ou fait partie des plus riches.
+
+- Les coefficients associés aux modalités `age[60,75]`, `age[75,90]` et à la variable `employed` sont significatifs au seuil de 1% mais leur signe est **positif** : la probabilité de ne pas avoir de crédit augmente lorsque l'individu fait partie des classes d'âge ci-dessus, ou lorsqu'il est employé.
+
+### Avec correction
+
+Nous devons en premier lieu détecter la présence d'hétéroscédasticité : on peut le faire avec le test de $Breusch-Pagan$ : $$\begin{cases}H_0 : \text{V}(\epsilon_i) = \sigma^2\\H_1:\text{V}(\epsilon_i) = \sigma_i^2\end{cases}$$
+
+***
+
+La $p-value$ du test est inférieure à 0.05, c'est à dire que l'hypothèse $H_0$ est rejetée et qu'il y a de l'hétéroscédasticité.
+
+Le modèle à probabilité linéaire fournit une variance connue du terme d'erreur à utiliser avec la méthode des **MCP (Moindres Carrés Pondérés)**, c'est à dire $\text{V}(\epsilon_i)=p_i(1-p_i)$. Dans ce cas il faut pondérer chaque observation par $\frac{1}{\sqrt{\text{V}(\epsilon_iX_i)}}$.
+
+- Il faut cependant préalablement vérifier qu'aucune des variances estimées ne soit négative : une façon d'éviter les probabilités $<0$ ou $>1$ est de les limiter à l'intervalle $[0,1]$.
+
+\newpage
+
+```{r heterosced, results='asis'}
+bp <- bptest(MCO)
+
+p <- fitted(MCO)
+p[p > 0.99] <- 0.99
+sig_corr <- p*(1-p)
+new_sigma <- 1/sig_corr
+
+GLS_tronquee = lm(credit ~ age + income_quintile + employed + saved + borrowed,
+         data = df_estimate, weights = new_sigma)
+
+stargazer(GLS_tronquee, type = "latex", header = F, font.size = "small", single.row = TRUE, selection.equation = T, title = "Régression linéaire par méthode des MCP")
+```
+
+On remarque cette fois que l'on a beaucoup plus de coefficients très significatifs et avec des valeurs légèrement différentes. Leur signe ne change pas. On remarque aussi que le $R^2$ a presque doublé par rapport à la régression précédente.
+
+## Logit
+
+```{r seed}
+set.seed((1789))
+```
+
+```{r logit, results = 'asis'}
+logit = glm(credit ~ age + income_quintile + employed + saved + borrowed,
+         data = df_estimate, family = binomial(link=logit))
+
+stargazer(logit, type = "latex", header = F, font.size = "small", single.row = TRUE, selection.equation = T, title = "Logit")
+```
+
+- En comparaison avec les modèles de régression linéaire, on voit que le coefficient associé à la variable `income_quintile` est non significativement différent de 0 pour le quintile 4.
+
+- Les variables les plus significatives restent `saved1` et `borrowed1`, avec une influence négative sur la probabilité de ne pas avoir un crédit par rapport aux catégories de référence `saved0` et `borrowed0` (c'est à dire une influence *positive* sur la probabilité d'avoir un crédit).
+
+- Les quintiles 2 & 5 sont assez significatifs, avec une influence positive sur la probabilité d'avoir un crédit par rapport à la catégorie de référence (**20% les plus pauvres**).
+
+\newpage
+
+### Rapports de chance
+
+```{r odds_ratio}
+sum_log <- summary(logit)
+
+tab_num_logit <- round(as.matrix(cbind(exp(logit$coefficients), sum_log$coefficients[,4])),3)
+colnames(tab_num_logit) = c("OR","p-value")
+tab_logit <- tab_num_logit
+
+tab_logit[,1] <- case_when(tab_logit[,2] <= 0.01 ~ paste(tab_logit[,1], "***"),
+          tab_logit[,2] <= 0.05 ~ paste(tab_logit[,1], "**"),
+          tab_logit[,2] <= 0.1 ~ paste(tab_logit[,1], "*"),
+          tab_logit[,2] > 0.1 ~ paste0(tab_logit[,1], ""),
+          )
+
+tab_logit %>% 
+kable(caption = "Odds Ratio selon les variables",
+    booktabs = F, escape = T) %>%
+    kable_styling(full_width = F, position = "center",
+                  latex_options = "hold_position") %>%
+    column_spec(1, width = "4cm", bold = T) %>% 
+    column_spec(2, color = "white", background = spec_color(tab_num_logit[,2]))
+```
+
+- Un individu dans la classe d'âge $[30,45]$ a $\frac{1}{0.569} \simeq 1.8$ fois plus de chance d'avoir un crédit qu'un individu situé dans la catégorie de référence $[15,30]$.
+
+- Un individu dans la classe d'âge $[60,75]$ a 2.17 fois plus de chance de ne pas avoir de crédit qu'un individu situé dans la catégorie de référence $[15,30]$. De la même manière, un individu dans la classe d'âge $[75,90]$ a 7.38 fois plus de chance de ne pas avoir de crédit.
+
+- Par rapport aux **20% les plus pauvres**, les **20% les plus riches** ont $\frac{1}{0.497} \simeq 2$ fois plus de chance d'avoir un crédit. 
+
+- Un individu ayant épargné l'année précédente a $\frac{1}{0.424} \simeq 2.4$ fois plus de chance d'avoir un crédit qu'un individu n'ayant pas épargné. La même observation peut être réalisée si l'individu a emprunté en $N-1$ : l'individu aura dans ce cas $\frac{1}{0.54} \simeq 1.85$ fois plus de chance d'avoir un crédit qu'un individu n'ayant pas emprunté l'année précédente.
+
+### Ajustement du modèle
+
+On effectue le test d'adéquation de Hosmer-Lemeshow pour évaluer l'adéquation du modèle **Logit** à nos données. Les hypothèses du test sont les suivantes : 
+
+$$\begin{cases}H_0 : \text{Le modèle s'ajuste bien aux données | si }p >0.05\\H_1:\text{Le modèle s'ajuste mal aux données | si }p<0.05\end{cases}$$
+```{r test_adeq, include = FALSE}
+hl_test <- hltest(logit)
+```
+
+- On obtient une $p-value =$ `r round(as.numeric(hl_test$p.value),2)`, celle-ci étant bien supérieure à 0.05, on conserve l'hypothèse $H_0$ : le modèle est bien ajusté.
+
+### Courbe ROC
+
+La courbe ROC est une mesure de la performance du modèle logit à travers le taux de faux positifs & de faux négatifs.
+
+- On recherche généralement une courbe ROC proche du coin supérieur gauche $(1,0)$, car dans ce cas le modèle ne fait pas d'erreur. 
+
+```{r logit_roc}
+roc_curve_logit <- roc(df_estimate$credit, predict(logit))
+
+auc_logit <- roc_curve_logit$auc
+
+ggroc(roc_curve_logit, col = darkblue) +
+  geom_abline(intercept = 1, slope = 1, col= "grey", linetype = "dashed") + 
+  labs(x = "Spécificité", y = "Sensibilité", title = "Courbe ROC : Logit") +
+  theme_minimal()
+```
+
+La mesure $AUC$, l'aire sous la courbe, est une mesure globale de qualité du modèle $\Rightarrow$ plus celle-ci est proche de 1, plus la qualité du modèle est grande.
+
+- On a ici un $AUC =$ `r round(auc_logit[1],2)` $\Rightarrow$ Le modèle n'est pas très performant.
+
+### Matrice de confusion
+
+```{r conf_mat_logit}
+confusion_matrix <- table(df_estimate$credit, round(logit$fitted.values))
+rownames(confusion_matrix) <- c("$credit_i=0$","$credit_i=1$")
+
+confusion_matrix %>% 
+kable(caption = "Matrice de confusion associée au Logit",
+      col.names = c("$\\hat{credit_i}=0$","$\\hat{credit_i}=1$"),
+    booktabs = T, escape = F) %>%
+    kable_styling(full_width = F, position = "center",
+                  latex_options = "hold_position")
+```
+
+- On retrouve le problème de *classe déséquilibrée* évoqué dans la première partie. En effet, le modèle prédit beaucoup mieux les individus qui n'ont pas de crédit que les individus qui ont effectivement un crédit.
+
+## Probit
+
+\begin{mainbox}{Spécifications liées au modèle}
+
+La différence entre le modèle \textbf{Logit} et \textbf{Probit} est que dans le modèle \textbf{Probit}, les termes d'erreur $\epsilon_i \sim \mathcal{N}(0,1)$. La fonction de répartition de l'erreur est donc : 
+
+$$P_{i}=\int_{-\infty}^{\beta_{0}+\beta_{i} x_{i}} \frac{1}{\sqrt{2 \pi}} \mathrm{e}^{-t^{2} / 2} \mathrm{~d} t$$
+\end{mainbox}
+
+```{r probit, results = 'asis'}
+probit = glm(credit ~ age + income_quintile + employed + saved + borrowed,
+         data = df_estimate, family = binomial(link=probit))
+
+stargazer(probit, type = "latex", header = F, font.size = "small", single.row = TRUE, selection.equation = T, title = "Probit")
+```
+
+- Les signes et la significativité des coefficients sont sensiblement les mêmes que le modèle **Logit** étudié précédemment.
+
+### Courbe ROC
+
+```{r probit_roc}
+roc_curve_probit <- roc(df_estimate$credit, predict(probit))
+
+auc_probit <- roc_curve_probit$auc
+
+ggroc(roc_curve_probit, col = darkblue) +
+  geom_abline(intercept = 1, slope = 1, col= "grey", linetype = "dashed") + 
+  labs(x = "Spécificité", y = "Sensibilité", title = "Courbe ROC : Probit") +
+  theme_minimal()
+```
+
+### Matrice de confusion
+
+```{r conf_mat_probit}
+confusion_matrix <- table(df_estimate$credit, round(probit$fitted.values))
+rownames(confusion_matrix) <- c("$credit_i=0$","$credit_i=1$")
+
+confusion_matrix %>% 
+kable(caption = "Matrice de confusion associée au Probit",
+      col.names = c("$\\hat{credit_i}=0$","$\\hat{credit_i}=1$"),
+    booktabs = T, escape = F) %>%
+    kable_styling(full_width = F, position = "center",
+                  latex_options = "hold_position")
+```
+
+- Le modèle **Probit** prédit **encore mieux** les individus n'ayant pas de crédit (comparé au modèle **Logit**)...cependant, ce n'est pas ce qui nous intéresse le plus.
+
+\newpage
+
+## Comparaison des résultats
+
+\begin{mainbox}{Quelques informations}
+
+Avant même de comparer les résultats, on peut exclure les modèles à probabilité linéaire des modèles candidats puisque ceux-ci violent de nombreuses hypothèses, même lorsque l'hétéroscédasticité a été corrigée.
+
+\end{mainbox}
+
+On va utiliser **le critère d'informations d’Akaike (AIC)** pour départager les 4 modèles.
+
+Ce critère mesure **la qualité de prédiction** d’un modèle en comparant son erreur de prédiction aux informations apportées par son nombre de paramètres.
+
+$$AIC = ln\left(\frac{SCR_{\epsilon}}{T}\right) + \frac{2(p+q)}{T}$$
+```{r aic}
+tabAIC <- rbind(c("Linéaire", round(AIC(MCO),2)),
+                c("Linéaire corrigé", round(AIC(GLS_tronquee),2)),
+                c("Logit", round(AIC(logit),2)),
+                c("Probit", round(AIC(probit),2)))
+
+colnames(tabAIC) <- c("Modèle", "$AIC$")
+
+tabAIC |> 
+  kable(booktabs = T, escape = F) |> 
+  add_header_above(header = c("Comparaison des AIC" = 2),
+                   color = "blackUniv", align = "c", italic = T, bold = T) |> 
+    kable_styling(full_width = F, position = "center",
+                  latex_options = c("striped", "hold_position")) |> 
+  row_spec(1:2, color = "#b61922", bold = T)
+```
+
+***
+
+Entre le modèle **Logit** & **Probit**, on préfère donc le modèle **Logit** puisque celui-ci a l'$AIC$ le plus faible et qu'il classifie mieux les personnes ayant un crédit. 
+
+De plus, l'$AUC$ du modèle **Logit** est légèrement plus élevé.
+
+\newpage
+
+```{r conclusion, results = 'asis'}
+stargazer(MCO, GLS_tronquee, logit, probit,
+          type = "latex", header = F, font.size = "small", no.space = TRUE,
+          single.row = FALSE, selection.equation = T, title = "Comparaison des modèles")
+```
+
+
+
+
+
+
+
+
+
+```{r, include = FALSE}
+ggplot(df_credit, aes(x = inc_q)) + 
+  geom_bar(color = "white", fill = "lightblue", alpha = 0.8) + 
+  ggtitle("Quantile du revenu") +
+  labs(subtitle = "1 : 20% les plus pauvres / 5 : 20% les plus riches")+
+  ylab("Effectifs") + xlab("") +
+  coord_flip() +
+  theme_minimal()
+```
+
+
+
+
