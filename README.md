@@ -1,4 +1,4 @@
-# Credit-access
+# Credit access
 
 Réalisé par *Aybuké BICAT* & *Corentin DUCLOUX*
 
