@@ -1,6 +1,6 @@
 # Credit access
 
-Réalisé par *[Aybuké BICAT]()* & *[Corentin DUCLOUX](https://github.com/CDucloux)*
+Réalisé par *[Aybuké BICAT](https://github.com/aybuke-b)* & *[Corentin DUCLOUX](https://github.com/CDucloux)*
 
 Le fichier `.pdf` contient l'ensemble de l'analyse $-$ Bonne lecture !
 
@@ -17,8 +17,6 @@ Le fichier `.pdf` contient l'ensemble de l'analyse $-$ Bonne lecture !
 ## Résultats
 
 - Le modèle le plus approprié pour cette analyse est le modèle **Logit** puisque la variable dépendante $y$ (le fait d'avoir ou non un crédit) est binaire.
-
-On peut interpréter les résultats de la sorte : 
 
 
 
